@@ -12,7 +12,7 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -39,3 +39,31 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+
+// Manifest of the handover: walk the folders that were just copied into the
+// output directory and record every file with its size, so whoever receives
+// the entry can see at a glance exactly what arrived, without opening each
+// folder by hand.
+function collectCopied(folder, base, acc) {
+  for (const name of readdirSync(folder)) {
+    const full = join(folder, name);
+    if (statSync(full).isDirectory()) {
+      collectCopied(full, base, acc);
+    } else {
+      acc.push({ path: full.slice(base.length + 1), bytes: statSync(full).size });
+    }
+  }
+}
+
+const copiedFiles = [];
+for (const folder of ['game', 'screenshots']) {
+  const target = join(out, folder);
+  if (existsSync(target)) collectCopied(target, out, copiedFiles);
+}
+copiedFiles.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+const copiedTotal = copiedFiles.reduce((sum, f) => sum + f.bytes, 0);
+writeFileSync(
+  join(out, 'manifest.json'),
+  JSON.stringify({ files: copiedFiles, file_count: copiedFiles.length, total_bytes: copiedTotal }, null, 2) + '\n',
+);
+console.log(`manifest: handed over ${copiedFiles.length} files, ${copiedTotal} bytes in total`);
